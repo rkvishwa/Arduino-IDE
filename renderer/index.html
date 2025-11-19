@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Arduino Compiler</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Arduino Code Compiler</h1>
+  
+  <textarea id="code" placeholder="Paste your Arduino code here..."></textarea>
+
+  <div class="controls">
+    <label>Board:</label>
+    <select id="board">
+      <option value="arduino:avr:uno">Arduino UNO</option>
+      <option value="esp32:esp32:esp32">ESP32</option>
+    </select>
+    <button id="compileBtn">Compile</button>
+  </div>
+
+  <pre id="output"></pre>
+  <a id="downloadLink" style="display:none" download>Download Compiled File</a>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

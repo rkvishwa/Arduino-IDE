@@ -1,0 +1,48 @@
+{
+  "name": "my-electron-app",
+  "version": "1.0.0",
+  "description": "test",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.example.arduino-compiler",
+    "productName": "Arduino Compiler",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!resources/arduino-cli/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/arduino-cli/",
+        "to": "arduino-cli",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    }
+  },
+  "author": "vishva",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^39.1.2",
+    "electron-builder": "^26.0.12"
+  }
+}
