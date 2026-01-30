@@ -1,3 +1,5 @@
 node_modules
 dist
-resources/arduino-cli
+resources/arduino-cli/linux
+resources/arduino-cli/windows
+resources/arduino-cli/macos

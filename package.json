@@ -1,15 +1,30 @@
 {
-  "name": "my-electron-app",
+  "name": "arduino-cloud-ide",
   "version": "1.0.0",
-  "description": "test",
+  "description": "Arduino IDE with Cloud Board Manager and OTA Updates",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "build:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "appwrite": "^13.0.0",
+    "bcryptjs": "^2.4.3",
+    "electron-store": "^11.0.2",
+    "inspire-tree": "^4.3.1",
+    "inspire-tree-dom": "^4.0.6",
+    "lodash": "^4.17.23",
+    "monaco-editor": "^0.55.1",
+    "node-pty": "^1.1.0",
+    "serialport": "^12.0.0",
+    "uuid": "^9.0.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "build": {
-    "appId": "com.example.arduino-compiler",
-    "productName": "Arduino Compiler",
+    "appId": "com.arduino.cloud-ide",
+    "productName": "Arduino Knurdz IDE",
     "directories": {
       "output": "dist"
     },
@@ -21,11 +36,13 @@
       {
         "from": "resources/arduino-cli/",
         "to": "arduino-cli",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
-      "target": "dmg",
+      "target": "zip",
       "category": "public.app-category.developer-tools"
     },
     "win": {
