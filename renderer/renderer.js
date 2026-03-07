@@ -74,6 +74,9 @@ let currentCode = '';
 // =============================================================================
 
 async function init() {
+  // Init Auth
+  initAuth();
+
   // Load user info
   await loadUserInfo();
 
@@ -200,14 +203,111 @@ async function init() {
 // USER MANAGEMENT
 // =============================================================================
 
+// AUTH UI
+const loginModal = document.getElementById('login-modal');
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+const authTitle = document.getElementById('auth-title');
+
+function initAuth() {
+  const linkRegister = document.getElementById('link-to-register');
+  const linkLogin = document.getElementById('link-to-login');
+
+  if (linkRegister) {
+    linkRegister.onclick = (e) => {
+      e.preventDefault();
+      loginForm.classList.add('hidden');
+      registerForm.classList.remove('hidden');
+      authTitle.textContent = 'Register for Arduino Cloud';
+    };
+  }
+
+  if (linkLogin) {
+    linkLogin.onclick = (e) => {
+      e.preventDefault();
+      registerForm.classList.add('hidden');
+      loginForm.classList.remove('hidden');
+      authTitle.textContent = 'Login to Arduino Cloud';
+    };
+  }
+
+  if (loginForm) {
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      await handleLogin(email, password);
+    };
+  }
+
+  if (registerForm) {
+    registerForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('reg-name').value;
+      const email = document.getElementById('reg-email').value;
+      const password = document.getElementById('reg-password').value;
+      await handleRegister(name, email, password);
+    };
+  }
+
+  // Logout
+  if (btnLogout) btnLogout.onclick = handleLogout;
+}
+
+function showLoginModal() {
+  if (loginModal) loginModal.classList.add('show');
+}
+
+function hideLoginModal() {
+  if (loginModal) loginModal.classList.remove('show');
+}
+
+async function handleLogin(email, password) {
+  showToast('Logging in...', 'info');
+  const result = await window.api.login({ email, password });
+  if (result.success) {
+    showToast('Login successful!', 'success');
+    hideLoginModal();
+    await loadUserInfo();
+    await loadBoards(); // Reload boards for this user
+  } else {
+    showToast(`Login failed: ${result.error}`, 'error');
+  }
+}
+
+async function handleRegister(name, email, password) {
+  showToast('Creating account...', 'info');
+  const result = await window.api.register({ email, password, name });
+  if (result.success) {
+    showToast('Account created! Logging in...', 'success');
+    await handleLogin(email, password);
+  } else {
+    showToast(`Registration failed: ${result.error}`, 'error');
+  }
+}
+
+async function handleLogout() {
+  if (!confirm('Are you sure you want to logout?')) return;
+  await window.api.logout();
+  showLoginModal();
+  // clear data
+  userName.textContent = 'Guest';
+  boards = [];
+  renderBoardList();
+}
+
 async function loadUserInfo() {
   try {
     const result = await window.api.getCurrentUser();
     if (result.success && result.user) {
       userName.textContent = result.user.name || result.user.email.split('@')[0];
+      hideLoginModal();
+    } else {
+      showLoginModal();
     }
   } catch (error) {
     console.error('Failed to load user info:', error);
+    showLoginModal();
   }
 }
 
