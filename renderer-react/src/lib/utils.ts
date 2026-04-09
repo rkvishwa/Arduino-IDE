@@ -1,0 +1,100 @@
+export function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+export function semverCompare(left: string, right: string) {
+  const leftParts = left.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = right.split('.').map((part) => Number.parseInt(part, 10) || 0);
+
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = leftParts[index] ?? 0;
+    const rightValue = rightParts[index] ?? 0;
+
+    if (leftValue > rightValue) {
+      return 1;
+    }
+
+    if (leftValue < rightValue) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
+export function nextSemver(version: string) {
+  const [major = 1, minor = 0, patch = 0] = version.split('.').map((part) => Number.parseInt(part, 10) || 0);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+export function calculateBoardStatus(lastSeen: string | null | undefined, persistedStatus: string) {
+  if (persistedStatus === 'pending') {
+    return 'pending';
+  }
+
+  if (!lastSeen) {
+    return 'offline';
+  }
+
+  const ageInMinutes = (Date.now() - new Date(lastSeen).getTime()) / 60000;
+  return ageInMinutes <= 2 ? 'online' : 'offline';
+}
+
+export function fileNameFromPath(filePath: string) {
+  const parts = filePath.split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+export function parentPath(filePath: string) {
+  const normalized = filePath.replace(/[\\/]+$/, '');
+  const separatorIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+  return separatorIndex >= 0 ? normalized.slice(0, separatorIndex) : normalized;
+}
+
+export function joinPath(basePath: string, name: string) {
+  const separator = basePath.includes('\\') ? '\\' : '/';
+  return `${basePath.replace(/[\\/]+$/, '')}${separator}${name.replace(/^[\\/]+/, '')}`;
+}
+
+export function normalizeOutput(output: string) {
+  return output.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+export function safeJsonParse<T>(value: string, fallback: T) {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function sha256Hex(value: string) {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  const bytes = Array.from(new Uint8Array(digest));
+  return bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export function generateToken(prefix = 'board') {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${prefix}_${token}`;
+}
+
+export function isFirmwareFileName(value: string) {
+  return /\.(ino|pde|cpp|c|h|hpp)$/i.test(value);
+}

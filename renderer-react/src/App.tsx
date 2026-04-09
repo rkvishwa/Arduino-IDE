@@ -1,35 +1,57 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useEffect, useState } from 'react';
+import type { Models } from 'appwrite';
+
+import { getCurrentUser } from '@/lib/auth';
+
+import { AuthScreen } from './components/AuthScreen';
+import { IDEWorkspace } from './components/IDEWorkspace';
+
+type AppInfo = {
+  appName: string;
+  version: string;
+};
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [user, setUser] = useState<Models.User<Models.Preferences> | null | undefined>(undefined);
+  const [appInfo, setAppInfo] = useState<AppInfo>({ appName: 'Tantalum IDE', version: '1.0.0' });
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+  useEffect(() => {
+    let mounted = true;
+
+    void window.tantalum.app.getInfo().then((result) => {
+      if (mounted && result.success) {
+        setAppInfo({ appName: result.appName, version: result.version });
+      }
+    });
+
+    void getCurrentUser().then((resolvedUser) => {
+      if (mounted) {
+        setUser(resolvedUser);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (user === undefined) {
+    return (
+      <div className="boot-screen">
+        <div className="boot-card">
+          <p className="eyebrow">Booting</p>
+          <h1>{appInfo.appName}</h1>
+          <p>Loading your local workspace, Appwrite session, and desktop toolchain.</p>
+        </div>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen appName={appInfo.appName} onAuthenticated={setUser} />;
+  }
+
+  return <IDEWorkspace appName={appInfo.appName} version={appInfo.version} user={user} onSignedOut={() => setUser(null)} />;
 }
 
-export default App
+export default App;

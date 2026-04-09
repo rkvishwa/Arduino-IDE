@@ -312,6 +312,81 @@ async function loadUserInfo() {
 }
 
 // =============================================================================
+// INPUT MODAL HELPER (replaces prompt() for Electron compatibility)
+// =============================================================================
+
+/**
+ * Show a custom input modal (replaces prompt() which doesn't work in Electron)
+ * @param {string} title - Modal title
+ * @param {string} label - Input label
+ * @param {string} placeholder - Input placeholder
+ * @param {string} defaultValue - Default value
+ * @param {string} submitText - Submit button text
+ * @returns {Promise<string|null>} - Entered value or null if cancelled
+ */
+function showInputModal(title, label, placeholder = '', defaultValue = '', submitText = 'Create') {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('input-modal');
+    const form = document.getElementById('input-modal-form');
+    const input = document.getElementById('input-modal-value');
+    const titleEl = document.getElementById('input-modal-title');
+    const labelEl = document.getElementById('input-modal-label');
+    const submitBtn = document.getElementById('input-modal-submit');
+
+    // Set values
+    titleEl.textContent = title;
+    labelEl.textContent = label;
+    input.placeholder = placeholder;
+    input.value = defaultValue;
+    submitBtn.textContent = submitText;
+
+    // Show modal
+    modal.classList.add('show');
+    input.focus();
+    input.select();
+
+    // Handler for submit
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      const value = input.value.trim();
+      modal.classList.remove('show');
+      cleanup();
+      resolve(value || null);
+    };
+
+    // Handler for cancel
+    const handleCancel = () => {
+      modal.classList.remove('show');
+      cleanup();
+      resolve(null);
+    };
+
+    // Handler for escape key
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') {
+        handleCancel();
+      }
+    };
+
+    // Cleanup function
+    const cleanup = () => {
+      form.removeEventListener('submit', handleSubmit);
+      modal.querySelectorAll('[data-close="input-modal"]').forEach(btn => {
+        btn.removeEventListener('click', handleCancel);
+      });
+      document.removeEventListener('keydown', handleKeydown);
+    };
+
+    // Attach handlers
+    form.addEventListener('submit', handleSubmit);
+    modal.querySelectorAll('[data-close="input-modal"]').forEach(btn => {
+      btn.addEventListener('click', handleCancel);
+    });
+    document.addEventListener('keydown', handleKeydown);
+  });
+}
+
+// =============================================================================
 // FILE EXPLORER
 // =============================================================================
 
@@ -336,12 +411,22 @@ async function initFileExplorer() {
     const btnNewFolder = document.getElementById('btn-new-folder');
     const btnRefresh = document.getElementById('btn-refresh-files');
 
-    if (btnOpen) btnOpen.onclick = openFolderDialog;
-    if (btnNewFile) btnNewFile.onclick = createNewFile;
-    if (btnNewFolder) btnNewFolder.onclick = createNewFolder;
-    if (btnRefresh) btnRefresh.onclick = () => {
-      if (currentWorkspace) loadFileTree(currentWorkspace);
-    };
+    if (btnOpen) {
+      btnOpen.addEventListener('click', openFolderDialog);
+    }
+    if (btnNewFile) {
+      console.log('Attaching new file listener');
+      btnNewFile.addEventListener('click', createNewFile);
+    }
+    if (btnNewFolder) {
+      console.log('Attaching new folder listener');
+      btnNewFolder.addEventListener('click', createNewFolder);
+    }
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', () => {
+        if (currentWorkspace) loadFileTree(currentWorkspace);
+      });
+    }
   }
 
   if (!currentWorkspace) {
@@ -389,17 +474,29 @@ function closeAllTabs() {
 }
 
 async function loadFileTree(folderPath) {
+  consoleLog(`loadFileTree called with: ${folderPath}`, 'info');
+
   const fileTree = document.getElementById('file-tree');
-  const noFolder = document.getElementById('no-folder');
 
   if (!folderPath) {
-    noFolder.style.display = 'flex';
+    // Show empty state by resetting the file tree
+    fileTree.innerHTML = `
+      <div class="empty-state" id="no-folder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+        <p>No folder opened</p>
+        <button id="btn-open-folder" class="btn-secondary">Open Folder</button>
+      </div>
+    `;
+    // Re-attach the open folder listener
+    const btnOpen = document.getElementById('btn-open-folder');
+    if (btnOpen) btnOpen.addEventListener('click', openFolderDialog);
     return;
   }
 
-  noFolder.style.display = 'none';
-
   const folderName = folderPath.split(/[\\/]/).pop();
+  consoleLog(`Folder name: ${folderName}`, 'info');
 
   fileTree.innerHTML = `
     <div class="workspace-header">
@@ -408,17 +505,24 @@ async function loadFileTree(folderPath) {
     <div class="file-tree" id="file-tree-root"></div>
   `;
 
-  await renderFolderContents(folderPath, document.getElementById('file-tree-root'));
+  const rootContainer = document.getElementById('file-tree-root');
+  consoleLog(`Root container found: ${!!rootContainer}`, 'info');
+
+  await renderFolderContents(folderPath, rootContainer);
+  consoleLog('loadFileTree completed', 'success');
 }
 
 async function renderFolderContents(folderPath, container) {
+  consoleLog(`renderFolderContents: ${folderPath}`, 'info');
   const result = await window.api.readDirectory(folderPath);
 
   if (!result.success) {
+    consoleLog(`Failed to read directory: ${result.error}`, 'error');
     container.innerHTML = `<div class="empty-state"><p>Error loading folder</p></div>`;
     return;
   }
 
+  consoleLog(`Found ${result.items.length} items in ${folderPath}`, 'info');
   container.innerHTML = '';
 
   for (const item of result.items) {
@@ -638,18 +742,26 @@ function updateStatusLine() {
 }
 
 async function createNewFile() {
+  consoleLog('Create New File initiated', 'info');
+
   if (!currentWorkspace) {
     showToast('Open a folder first', 'warning');
     return;
   }
 
-  const fileName = prompt('Enter file name:', 'sketch.ino');
-  if (!fileName) return;
+  try {
+    const fileName = await showInputModal('New File', 'File name', 'sketch.ino', 'sketch.ino', 'Create File');
+    consoleLog(`Modal returned: ${fileName}`, 'info');
 
-  // Arduino sketch template
-  let content = '';
-  if (fileName.endsWith('.ino')) {
-    content = `// ${fileName}
+    if (!fileName) {
+      consoleLog('File creation cancelled', 'info');
+      return;
+    }
+
+    // Arduino sketch template
+    let content = '';
+    if (fileName.endsWith('.ino')) {
+      content = `// ${fileName}
 // Arduino Sketch
 
 void setup() {
@@ -663,37 +775,62 @@ void loop() {
   delay(1000);
 }
 `;
-  }
+    }
 
-  const result = await window.api.createFile(currentWorkspace, fileName, content);
+    consoleLog(`Creating file: ${fileName} in ${currentWorkspace}`, 'info');
+    const result = await window.api.createFile(currentWorkspace, fileName, content);
+    consoleLog(`Create result: ${JSON.stringify(result)}`, result.success ? 'success' : 'error');
 
-  if (result.success) {
-    showToast(`Created ${fileName}`, 'success');
-    await loadFileTree(currentWorkspace);
-    await openFileInEditor(result.path, fileName);
-  } else {
-    showToast(`Error: ${result.error}`, 'error');
+    if (result.success) {
+      showToast(`Created ${fileName}`, 'success');
+      consoleLog('Reloading file tree...', 'info');
+      await loadFileTree(currentWorkspace);
+      consoleLog('Opening file...', 'info');
+      await openFileInEditor(result.path, fileName);
+    } else {
+      consoleLog(`File creation failed: ${result.error}`, 'error');
+      showToast(`Error: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    consoleLog(`Critical error in createNewFile: ${err.message}`, 'error');
+    console.error(err);
   }
 }
 
 async function createNewFolder() {
+  consoleLog('Create New Folder initiated', 'info');
+
   if (!currentWorkspace) {
     showToast('Open a folder first', 'warning');
     return;
   }
 
-  const folderName = prompt('Enter folder name:');
-  if (!folderName) return;
+  try {
+    const folderName = await showInputModal('New Folder', 'Folder name', 'new_folder', '', 'Create Folder');
 
-  const result = await window.api.createFolder(currentWorkspace, folderName);
+    if (!folderName) {
+      consoleLog('Folder creation cancelled', 'info');
+      return;
+    }
 
-  if (result.success) {
-    showToast(`Created ${folderName}`, 'success');
-    await loadFileTree(currentWorkspace);
-  } else {
-    showToast(`Error: ${result.error}`, 'error');
+    consoleLog(`Creating folder: ${folderName} in ${currentWorkspace}`, 'info');
+    const result = await window.api.createFolder(currentWorkspace, folderName);
+    consoleLog(`Create result: ${JSON.stringify(result)}`, result.success ? 'success' : 'error');
+
+    if (result.success) {
+      showToast(`Created ${folderName}`, 'success');
+      consoleLog('Reloading file tree...', 'info');
+      await loadFileTree(currentWorkspace);
+    } else {
+      consoleLog(`Folder creation failed: ${result.error}`, 'error');
+      showToast(`Error: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    consoleLog(`Critical error in createNewFolder: ${err.message}`, 'error');
+    console.error(err);
   }
 }
+
 
 function showFileContextMenu(e, item) {
   // Remove any existing context menu

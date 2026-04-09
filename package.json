@@ -1,12 +1,17 @@
 {
-  "name": "arduino-cloud-ide",
+  "name": "tantalum-ide",
   "version": "1.0.0",
-  "description": "Arduino IDE with Cloud Board Manager and OTA Updates",
+  "description": "Tantalum IDE desktop app with Arduino tooling, Appwrite-backed auth, OTA workflows, and a React + TypeScript UI.",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "dist": "electron-builder",
-    "build:mac": "electron-builder --mac"
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "npm --prefix renderer-react run dev -- --host 127.0.0.1 --port 5173",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "start": "npm run build:renderer && electron .",
+    "build:renderer": "npm --prefix renderer-react run build",
+    "lint:renderer": "npm --prefix renderer-react run lint",
+    "dist": "npm run build:renderer && electron-builder",
+    "build:mac": "npm run build:renderer && electron-builder --mac"
   },
   "dependencies": {
     "appwrite": "^13.0.0",
@@ -23,8 +28,8 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "build": {
-    "appId": "com.arduino.cloud-ide",
-    "productName": "Arduino Knurdz IDE",
+    "appId": "com.tantalum.ide",
+    "productName": "Tantalum IDE",
     "directories": {
       "output": "dist"
     },
@@ -59,7 +64,10 @@
   "author": "vishva",
   "license": "ISC",
   "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "electron": "^39.1.2",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "wait-on": "^8.0.5"
   }
 }

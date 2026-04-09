@@ -1,5 +1,9 @@
 node_modules
 dist
+renderer-react/dist
+renderer-react/.env
+renderer-react/.env.local
 resources/arduino-cli/linux
 resources/arduino-cli/windows
 resources/arduino-cli/macos
+sites

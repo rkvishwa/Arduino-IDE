@@ -11,28 +11,48 @@ function getCliPath() {
   const platform = process.platform; // "darwin", "win32", "linux"
   const arch = process.arch;         // "x64", "arm64", etc.
 
-  // Check if we're in development or production mode
-  // In development, use the local resources folder
-  // In production (packaged), use process.resourcesPath
-  const devPath = path.join(__dirname, "resources", "arduino-cli");
-  const prodPath = process.resourcesPath ? path.join(process.resourcesPath, "arduino-cli") : null;
-
-  // Use dev path if it exists, otherwise use prod path
-  const basePath = fs.existsSync(devPath) ? devPath : prodPath;
-
-  // console.log('CLI Path Debug:', { devPath, prodPath, basePath, exists: fs.existsSync(devPath) });
-
-  let cliPath;
-
+  // Determine the CLI binary name based on platform
+  let cliBinaryName;
   if (platform === "darwin") {
-    cliPath = path.join(basePath, "macos", arch === "arm64" ? "arduino-cli-arm64" : "arduino-cli-x64");
+    cliBinaryName = arch === "arm64" ? "arduino-cli-arm64" : "arduino-cli-x64";
   } else if (platform === "win32") {
-    cliPath = path.join(basePath, "windows", "arduino-cli.exe");
+    cliBinaryName = "arduino-cli.exe";
   } else if (platform === "linux") {
-    cliPath = path.join(basePath, "linux", "arduino-cli");
+    cliBinaryName = "arduino-cli";
   } else {
     throw new Error("Unsupported OS for Arduino CLI");
   }
+
+  // Platform folder name
+  const platformFolder = platform === "darwin" ? "macos" : platform === "win32" ? "windows" : "linux";
+
+  // Check multiple possible paths for the CLI binary
+  const possiblePaths = [
+    // Development path (direct project folder)
+    path.join(__dirname, "resources", platformFolder, cliBinaryName),
+    // Alternative development path (if arduino-cli subfolder exists)
+    path.join(__dirname, "resources", "arduino-cli", platformFolder, cliBinaryName),
+    // Production path (packaged app)
+    process.resourcesPath ? path.join(process.resourcesPath, "arduino-cli", platformFolder, cliBinaryName) : null,
+    // Another production variant
+    process.resourcesPath ? path.join(process.resourcesPath, platformFolder, cliBinaryName) : null,
+  ].filter(Boolean);
+
+  // Find the first path that exists
+  let cliPath = null;
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      cliPath = p;
+      break;
+    }
+  }
+
+  if (!cliPath) {
+    console.error('Arduino CLI not found! Checked paths:', possiblePaths);
+    throw new Error(`Arduino CLI binary not found. Checked: ${possiblePaths.join(', ')}`);
+  }
+
+  console.log('Arduino CLI path:', cliPath);
 
   // Ensure executable permission on macOS/Linux
   if (platform !== "win32") {
@@ -45,6 +65,8 @@ function getCliPath() {
 
   return cliPath;
 }
+
+
 
 /**
  * Helper to run a command with progress tracking

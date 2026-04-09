@@ -1,148 +1,110 @@
 /**
  * ESP32 OTA Client Firmware
- * 
- * This firmware is flashed to ESP32 boards during initial provisioning.
- * It handles:
- * - WiFi connection
- * - Polling for firmware updates from Appwrite cloud
- * - OTA firmware updates
- * - Heartbeat reporting to cloud
- * 
- * Placeholders are replaced during provisioning:
+ *
+ * Placeholders replaced during provisioning:
  * - {{WIFI_SSID}}
  * - {{WIFI_PASSWORD}}
  * - {{API_TOKEN}}
  * - {{BOARD_ID}}
  * - {{APPWRITE_ENDPOINT}}
- * - {{FIRMWARE_BUCKET_ID}}
+ * - {{APPWRITE_PROJECT_ID}}
+ * - {{DEVICE_GATEWAY_FUNCTION_ID}}
  */
 
-#include <WiFi.h>
+#include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
-#include <ArduinoJson.h>
 #include <Preferences.h>
-
-// =============================================================================
-// CONFIGURATION - These values are injected during provisioning
-// =============================================================================
+#include <WiFi.h>
 
 const char* WIFI_SSID = "{{WIFI_SSID}}";
 const char* WIFI_PASSWORD = "{{WIFI_PASSWORD}}";
 const char* API_TOKEN = "{{API_TOKEN}}";
 const char* BOARD_ID = "{{BOARD_ID}}";
 const char* APPWRITE_ENDPOINT = "{{APPWRITE_ENDPOINT}}";
-const char* FIRMWARE_BUCKET_ID = "{{FIRMWARE_BUCKET_ID}}";
-
-// =============================================================================
-// FIRMWARE VERSION - Increment this with each update
-// =============================================================================
+const char* APPWRITE_PROJECT_ID = "{{APPWRITE_PROJECT_ID}}";
+const char* DEVICE_GATEWAY_FUNCTION_ID = "{{DEVICE_GATEWAY_FUNCTION_ID}}";
 
 const char* FIRMWARE_VERSION = "1.0.0";
 
-// =============================================================================
-// TIMING CONFIGURATION
-// =============================================================================
-
-const unsigned long UPDATE_CHECK_INTERVAL = 30000;  // Check for updates every 30 seconds
-const unsigned long HEARTBEAT_INTERVAL = 60000;     // Send heartbeat every 60 seconds
-const unsigned long WIFI_RETRY_DELAY = 5000;        // Wait 5 seconds between WiFi retries
-const int MAX_WIFI_RETRIES = 20;                    // Max WiFi connection attempts
-
-// =============================================================================
-// GLOBAL VARIABLES
-// =============================================================================
+const unsigned long UPDATE_CHECK_INTERVAL = 30000;
+const unsigned long HEARTBEAT_INTERVAL = 60000;
+const unsigned long WIFI_RETRY_DELAY = 5000;
+const int MAX_WIFI_RETRIES = 20;
 
 Preferences preferences;
 unsigned long lastUpdateCheck = 0;
 unsigned long lastHeartbeat = 0;
 bool otaInProgress = false;
 
-// =============================================================================
-// SETUP
-// =============================================================================
+bool executeGatewayFunction(const char* functionPath, JsonDocument& payload, DynamicJsonDocument& responseDoc) {
+  HTTPClient http;
+  String url = String(APPWRITE_ENDPOINT) + "/functions/" + DEVICE_GATEWAY_FUNCTION_ID + "/executions";
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  
-  Serial.println();
-  Serial.println("===========================================");
-  Serial.println("  ESP32 OTA Client");
-  Serial.println("  Arduino Knurdz IDE");
-  Serial.println("===========================================");
-  Serial.print("Firmware Version: ");
-  Serial.println(FIRMWARE_VERSION);
-  Serial.print("Board ID: ");
-  Serial.println(BOARD_ID);
-  Serial.println();
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Appwrite-Project", APPWRITE_PROJECT_ID);
 
-  // Initialize preferences for storing rollback info
-  preferences.begin("ota", false);
-  
-  // Connect to WiFi
-  connectToWiFi();
-  
-  // Send initial heartbeat
-  sendHeartbeat();
-  
-  // Check for updates immediately on boot
-  checkForUpdates();
+  String payloadText;
+  serializeJson(payload, payloadText);
 
-  Serial.println();
-  Serial.println("Setup complete! Entering main loop...");
-  Serial.println("===========================================");
+  DynamicJsonDocument executionDoc(2048);
+  executionDoc["async"] = false;
+  executionDoc["path"] = functionPath;
+  executionDoc["method"] = "POST";
+  JsonObject headers = executionDoc.createNestedObject("headers");
+  headers["content-type"] = "application/json";
+  executionDoc["body"] = payloadText;
+
+  String requestBody;
+  serializeJson(executionDoc, requestBody);
+
+  int httpCode = http.POST(requestBody);
+  if (httpCode != HTTP_CODE_CREATED && httpCode != HTTP_CODE_OK) {
+    Serial.print("Function execution failed. HTTP code: ");
+    Serial.println(httpCode);
+    Serial.println(http.getString());
+    http.end();
+    return false;
+  }
+
+  String executionResponse = http.getString();
+  http.end();
+
+  DynamicJsonDocument parsedExecution(4096);
+  DeserializationError executionError = deserializeJson(parsedExecution, executionResponse);
+  if (executionError) {
+    Serial.print("Failed to parse execution response: ");
+    Serial.println(executionError.c_str());
+    return false;
+  }
+
+  int responseStatusCode = parsedExecution["responseStatusCode"] | 500;
+  const char* responseBody = parsedExecution["responseBody"];
+  if (responseStatusCode >= 400 || responseBody == nullptr) {
+    Serial.print("Gateway function returned an error. Status: ");
+    Serial.println(responseStatusCode);
+    Serial.println(responseBody == nullptr ? "No body returned." : responseBody);
+    return false;
+  }
+
+  DeserializationError bodyError = deserializeJson(responseDoc, responseBody);
+  if (bodyError) {
+    Serial.print("Failed to parse function body: ");
+    Serial.println(bodyError.c_str());
+    return false;
+  }
+
+  bool ok = responseDoc["ok"] | false;
+  if (!ok) {
+    const char* errorMessage = responseDoc["error"] | "Unknown function error.";
+    Serial.print("Gateway function reported an error: ");
+    Serial.println(errorMessage);
+    return false;
+  }
+
+  return true;
 }
-
-// =============================================================================
-// MAIN LOOP
-// =============================================================================
-
-void loop() {
-  // Maintain WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected! Reconnecting...");
-    connectToWiFi();
-  }
-
-  // Don't do anything else during OTA
-  if (otaInProgress) {
-    delay(100);
-    return;
-  }
-
-  unsigned long currentMillis = millis();
-
-  // Check for firmware updates periodically
-  if (currentMillis - lastUpdateCheck >= UPDATE_CHECK_INTERVAL) {
-    lastUpdateCheck = currentMillis;
-    checkForUpdates();
-  }
-
-  // Send heartbeat periodically
-  if (currentMillis - lastHeartbeat >= HEARTBEAT_INTERVAL) {
-    lastHeartbeat = currentMillis;
-    sendHeartbeat();
-  }
-
-  // Your custom code can go here!
-  // This section runs continuously on the board
-  // ----------------------------------------
-  
-  // Example: Blink built-in LED
-  // digitalWrite(LED_BUILTIN, HIGH);
-  // delay(500);
-  // digitalWrite(LED_BUILTIN, LOW);
-  // delay(500);
-
-  // ----------------------------------------
-
-  delay(100);  // Small delay to prevent watchdog issues
-}
-
-// =============================================================================
-// WIFI CONNECTION
-// =============================================================================
 
 void connectToWiFi() {
   Serial.print("Connecting to WiFi: ");
@@ -163,129 +125,34 @@ void connectToWiFi() {
     Serial.println("WiFi connected!");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-    Serial.print("Signal Strength: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
   } else {
     Serial.println();
-    Serial.println("ERROR: Failed to connect to WiFi!");
-    Serial.println("Restarting in 10 seconds...");
-    delay(10000);
+    Serial.println("ERROR: Failed to connect to WiFi.");
+    delay(5000);
     ESP.restart();
   }
 }
 
-// =============================================================================
-// CHECK FOR FIRMWARE UPDATES
-// =============================================================================
-
-void checkForUpdates() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Cannot check for updates - WiFi not connected");
-    return;
-  }
-
-  Serial.println();
-  Serial.println("Checking for firmware updates...");
-
-  HTTPClient http;
-  
-  // Build the update check URL
-  // This endpoint should be an Appwrite Function or your backend
-  String url = String(APPWRITE_ENDPOINT) + "/functions/check-update";
-  
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Appwrite-Project", getProjectId());
-
-  // Send current version and API token
-  StaticJsonDocument<256> requestDoc;
-  requestDoc["apiToken"] = API_TOKEN;
-  requestDoc["currentVersion"] = FIRMWARE_VERSION;
-  requestDoc["boardId"] = BOARD_ID;
-  
-  String requestBody;
-  serializeJson(requestDoc, requestBody);
-
-  int httpCode = http.POST(requestBody);
-
-  if (httpCode == HTTP_CODE_OK) {
-    String response = http.getString();
-    
-    StaticJsonDocument<512> responseDoc;
-    DeserializationError error = deserializeJson(responseDoc, response);
-    
-    if (!error) {
-      bool updateAvailable = responseDoc["updateAvailable"] | false;
-      
-      if (updateAvailable) {
-        const char* newVersion = responseDoc["firmware"]["version"];
-        const char* downloadUrl = responseDoc["firmware"]["downloadUrl"];
-        int size = responseDoc["firmware"]["size"];
-        const char* checksum = responseDoc["firmware"]["checksum"];
-        
-        Serial.println("===========================================");
-        Serial.println("  UPDATE AVAILABLE!");
-        Serial.println("===========================================");
-        Serial.print("Current Version: ");
-        Serial.println(FIRMWARE_VERSION);
-        Serial.print("New Version: ");
-        Serial.println(newVersion);
-        Serial.print("Size: ");
-        Serial.print(size);
-        Serial.println(" bytes");
-        Serial.println();
-        
-        // Perform OTA update
-        performOTAUpdate(downloadUrl, newVersion);
-      } else {
-        Serial.println("Firmware is up to date.");
-      }
-    } else {
-      Serial.print("JSON parsing error: ");
-      Serial.println(error.c_str());
-    }
-  } else {
-    Serial.print("Update check failed. HTTP code: ");
-    Serial.println(httpCode);
-  }
-
-  http.end();
-}
-
-// =============================================================================
-// PERFORM OTA UPDATE
-// =============================================================================
-
 void performOTAUpdate(const char* downloadUrl, const char* newVersion) {
   Serial.println("Starting OTA update...");
-  Serial.print("Download URL: ");
-  Serial.println(downloadUrl);
-  
   otaInProgress = true;
 
-  // Store current version for potential rollback
   preferences.putString("prev_version", FIRMWARE_VERSION);
-  preferences.putString("new_version", newVersion);
+  preferences.putString("next_version", newVersion);
 
   WiFiClient client;
-  
-  // Configure HTTP Update
-  httpUpdate.setLedPin(LED_BUILTIN, LOW);
   httpUpdate.rebootOnUpdate(true);
 
-  // Set update callbacks
   httpUpdate.onStart([]() {
-    Serial.println("OTA update started...");
+    Serial.println("OTA update started.");
   });
 
   httpUpdate.onEnd([]() {
-    Serial.println("OTA update completed!");
-    Serial.println("Rebooting...");
+    Serial.println("OTA update completed.");
   });
 
   httpUpdate.onProgress([](int current, int total) {
-    int percent = (current * 100) / total;
+    int percent = total > 0 ? (current * 100) / total : 0;
     Serial.printf("Progress: %d%% (%d / %d bytes)\n", percent, current, total);
   });
 
@@ -293,96 +160,121 @@ void performOTAUpdate(const char* downloadUrl, const char* newVersion) {
     Serial.printf("OTA Error[%d]: %s\n", error, httpUpdate.getLastErrorString().c_str());
   });
 
-  // Perform the update
   t_httpUpdate_return result = httpUpdate.update(client, downloadUrl);
 
   switch (result) {
     case HTTP_UPDATE_FAILED:
-      Serial.printf("OTA Failed! Error (%d): %s\n", 
-        httpUpdate.getLastError(), 
-        httpUpdate.getLastErrorString().c_str());
+      Serial.printf(
+        "OTA Failed! Error (%d): %s\n",
+        httpUpdate.getLastError(),
+        httpUpdate.getLastErrorString().c_str()
+      );
       otaInProgress = false;
       break;
-      
     case HTTP_UPDATE_NO_UPDATES:
       Serial.println("No update needed.");
       otaInProgress = false;
       break;
-      
     case HTTP_UPDATE_OK:
       Serial.println("OTA Success! Rebooting...");
-      // Device will reboot automatically
       break;
   }
 }
 
-// =============================================================================
-// SEND HEARTBEAT
-// =============================================================================
-
-void sendHeartbeat() {
+void checkForUpdates() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Cannot send heartbeat - WiFi not connected");
+    Serial.println("Cannot check for updates without WiFi.");
     return;
   }
 
-  Serial.print("Sending heartbeat... ");
+  StaticJsonDocument<256> payload;
+  payload["boardId"] = BOARD_ID;
+  payload["apiToken"] = API_TOKEN;
+  payload["currentVersion"] = FIRMWARE_VERSION;
 
-  HTTPClient http;
-  
-  // Build the heartbeat URL
-  String url = String(APPWRITE_ENDPOINT) + "/functions/heartbeat";
-  
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Appwrite-Project", getProjectId());
-
-  // Send heartbeat data
-  StaticJsonDocument<384> doc;
-  doc["apiToken"] = API_TOKEN;
-  doc["boardId"] = BOARD_ID;
-  doc["version"] = FIRMWARE_VERSION;
-  doc["rssi"] = WiFi.RSSI();
-  doc["freeHeap"] = ESP.getFreeHeap();
-  doc["uptime"] = millis() / 1000;  // Uptime in seconds
-  
-  String requestBody;
-  serializeJson(doc, requestBody);
-
-  int httpCode = http.POST(requestBody);
-
-  if (httpCode == HTTP_CODE_OK) {
-    Serial.println("OK");
-  } else {
-    Serial.print("Failed! HTTP code: ");
-    Serial.println(httpCode);
+  DynamicJsonDocument responseDoc(4096);
+  if (!executeGatewayFunction("/check-update", payload, responseDoc)) {
+    return;
   }
 
-  http.end();
+  bool updateAvailable = responseDoc["data"]["updateAvailable"] | false;
+  if (!updateAvailable) {
+    Serial.println("Firmware is up to date.");
+    return;
+  }
+
+  const char* nextVersion = responseDoc["data"]["firmware"]["version"] | "";
+  const char* downloadUrl = responseDoc["data"]["firmware"]["downloadUrl"] | "";
+
+  if (strlen(downloadUrl) == 0 || strlen(nextVersion) == 0) {
+    Serial.println("Update metadata was incomplete.");
+    return;
+  }
+
+  Serial.print("Update available: ");
+  Serial.println(nextVersion);
+  performOTAUpdate(downloadUrl, nextVersion);
 }
 
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
+void sendHeartbeat() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Cannot send heartbeat without WiFi.");
+    return;
+  }
 
-String getProjectId() {
-  // Extract project ID from endpoint
-  // Format: https://cloud.appwrite.io/v1 -> need to get from config
-  // For now, return empty - this would be set during provisioning
-  return "";
+  StaticJsonDocument<384> payload;
+  payload["boardId"] = BOARD_ID;
+  payload["apiToken"] = API_TOKEN;
+  payload["version"] = FIRMWARE_VERSION;
+  payload["rssi"] = WiFi.RSSI();
+  payload["freeHeap"] = ESP.getFreeHeap();
+  payload["uptime"] = millis() / 1000;
+
+  DynamicJsonDocument responseDoc(1024);
+  if (executeGatewayFunction("/heartbeat", payload, responseDoc)) {
+    Serial.println("Heartbeat sent.");
+  }
 }
 
-// =============================================================================
-// USER CODE SECTION
-// =============================================================================
-// Add your custom setup code here
-void userSetup() {
-  // Example: Initialize sensors, set pin modes, etc.
-  // pinMode(LED_BUILTIN, OUTPUT);
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println();
+  Serial.println("===========================================");
+  Serial.println("          Tantalum IDE OTA Client          ");
+  Serial.println("===========================================");
+  Serial.print("Board ID: ");
+  Serial.println(BOARD_ID);
+  Serial.print("Firmware Version: ");
+  Serial.println(FIRMWARE_VERSION);
+
+  preferences.begin("tantalum-ota", false);
+  connectToWiFi();
+  sendHeartbeat();
+  checkForUpdates();
 }
 
-// Add your custom loop code here
-void userLoop() {
-  // Example: Read sensors, control outputs, etc.
-  // This runs in the main loop alongside OTA checks
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    connectToWiFi();
+  }
+
+  if (otaInProgress) {
+    delay(100);
+    return;
+  }
+
+  unsigned long now = millis();
+  if (now - lastUpdateCheck >= UPDATE_CHECK_INTERVAL) {
+    lastUpdateCheck = now;
+    checkForUpdates();
+  }
+
+  if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+    lastHeartbeat = now;
+    sendHeartbeat();
+  }
+
+  delay(100);
 }

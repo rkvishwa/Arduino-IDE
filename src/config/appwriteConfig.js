@@ -4,6 +4,38 @@
  */
 
 const { Client, Account, Databases, Storage, ID, Query } = require('appwrite');
+const sharedConfig = require('../../appwrite.config.json');
+
+function deriveCollections(config) {
+    if (config.collections && typeof config.collections === 'object') {
+        return config.collections;
+    }
+
+    const tables = Array.isArray(config.tables) ? config.tables : [];
+    return {
+        boards: tables.find((table) => table.$id === 'boards')?.$id || 'boards',
+        firmwares: tables.find((table) => table.$id === 'firmwares')?.$id || 'firmwares',
+        sketches: tables.find((table) => table.$id === 'sketches')?.$id || 'sketches'
+    };
+}
+
+function deriveDatabaseId(config) {
+    if (typeof config.databaseId === 'string' && config.databaseId.length > 0) {
+        return config.databaseId;
+    }
+
+    const tablesDb = Array.isArray(config.tablesDB) ? config.tablesDB : [];
+    return tablesDb[0]?.$id || '';
+}
+
+function deriveFirmwareBucketId(config) {
+    if (typeof config.firmwareBucketId === 'string' && config.firmwareBucketId.length > 0) {
+        return config.firmwareBucketId;
+    }
+
+    const buckets = Array.isArray(config.buckets) ? config.buckets : [];
+    return buckets.find((bucket) => bucket.$id === 'firmware_bucket')?.$id || buckets[0]?.$id || '';
+}
 
 // =============================================================================
 // APPWRITE CONFIGURATION - UPDATE THESE VALUES
@@ -11,23 +43,19 @@ const { Client, Account, Databases, Storage, ID, Query } = require('appwrite');
 
 const APPWRITE_CONFIG = {
     // Appwrite endpoint - use Appwrite Cloud or your self-hosted instance
-    endpoint: 'https://sgp.cloud.appwrite.io/v1',
+    endpoint: sharedConfig.endpoint,
 
     // Your Appwrite Project ID
-    projectId: '697b8f42002a34ba04b3',
+    projectId: sharedConfig.projectId,
 
     // Database ID (create in Appwrite Console)
-    databaseId: '697b8f660033fffde4be',
+    databaseId: deriveDatabaseId(sharedConfig),
 
     // Collection IDs
-    collections: {
-        boards: 'boards',
-        firmwares: 'firmwares',
-        sketches: 'sketches'
-    },
+    collections: deriveCollections(sharedConfig),
 
     // Storage Bucket ID for firmware files
-    firmwareBucketId: 'firmware_bucket'
+    firmwareBucketId: deriveFirmwareBucketId(sharedConfig)
 };
 
 // =============================================================================

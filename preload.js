@@ -1,146 +1,86 @@
-/**
- * Arduino Cloud IDE - Preload Script
- * Exposes secure IPC channels to renderer process
- */
-
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("api", {
-  // ==========================================================================
-  // AUTHENTICATION
-  // ==========================================================================
-  login: (data) => ipcRenderer.invoke("auth-login", data),
-  register: (data) => ipcRenderer.invoke("auth-register", data),
-  logout: () => ipcRenderer.invoke("auth-logout"),
-  getCurrentUser: () => ipcRenderer.invoke("auth-get-user"),
+function subscribe(channel, callback) {
+  const listener = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, listener);
 
-  // ==========================================================================
-  // BOARD MANAGEMENT
-  // ==========================================================================
-  listBoards: () => ipcRenderer.invoke("boards-list"),
-  createBoard: (data) => ipcRenderer.invoke("boards-create", data),
-  getBoard: (boardId) => ipcRenderer.invoke("boards-get", boardId),
-  updateBoard: (id, data) => ipcRenderer.invoke("boards-update", { id, data }),
-  deleteBoard: (boardId) => ipcRenderer.invoke("boards-delete", boardId),
-  regenerateBoardToken: (boardId) => ipcRenderer.invoke("boards-regenerate-token", boardId),
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
 
-  // ==========================================================================
-  // COMPILATION
-  // ==========================================================================
-  compileArduino: (data) => ipcRenderer.invoke("compile-arduino", data),
-  installBoardPackage: (data) => ipcRenderer.invoke("install-board-package", data),
-  installBoardPackage: (data) => ipcRenderer.invoke("install-board-package", data),
-  removeBoardPackage: (data) => ipcRenderer.invoke("remove-board-package", data),
-  listInstalledBoards: () => ipcRenderer.invoke("list-installed-boards"),
-  searchBoardPlatforms: (query) => ipcRenderer.invoke("search-board-platforms", query),
-  listInstalledPlatforms: () => ipcRenderer.invoke("list-installed-platforms"),
-  onInstallProgress: (callback) => ipcRenderer.on("install-progress", (event, data) => callback(data)),
-
-  // ==========================================================================
-  // LIBRARY MANAGEMENT
-  // ==========================================================================
-  searchLibraries: (query) => ipcRenderer.invoke("libraries-search", query),
-  installLibrary: (name, version) => ipcRenderer.invoke("libraries-install", { name, version }),
-  listInstalledLibraries: () => ipcRenderer.invoke("libraries-list"),
-
-  // ==========================================================================
-  // FIRMWARE & OTA
-  // ==========================================================================
-  uploadToCloud: (data) => ipcRenderer.invoke("firmware-upload", data),
-  getFirmwareHistory: (boardId) => ipcRenderer.invoke("firmware-history", boardId),
-  deployFirmware: (firmwareId) => ipcRenderer.invoke("firmware-deploy", firmwareId),
-  deleteFirmware: (firmwareId) => ipcRenderer.invoke("firmware-delete", firmwareId),
-
-  // ==========================================================================
-  // PROVISIONING
-  // ==========================================================================
-  listPorts: () => ipcRenderer.invoke("ports-list"),
-  provisionBoard: (data) => ipcRenderer.invoke("provision-board", data),
-  installESP32Support: () => ipcRenderer.invoke("install-esp32-support"),
-
-  // ==========================================================================
-  // LIBRARY MANAGER
-  // ==========================================================================
-  searchLibraries: (query) => ipcRenderer.invoke("libraries-search", query),
-  getFeaturedLibraries: () => ipcRenderer.invoke("libraries-featured"),
-  installLibrary: (name, version) => ipcRenderer.invoke("libraries-install", { name, version }),
-  listInstalledLibraries: () => ipcRenderer.invoke("libraries-list"),
-
-  // ==========================================================================
-  // UTILITIES
-  // ==========================================================================
-  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
-  getAppwriteConfig: () => ipcRenderer.invoke("get-appwrite-config"),
-  openExternal: (url) => ipcRenderer.invoke("open-external", url),
-
-  // ==========================================================================
-  // MENU EVENT LISTENERS
-  // ==========================================================================
-  onMenuEvent: (channel, callback) => {
-    const validChannels = [
-      "menu-new-sketch",
-      "menu-open-sketch",
-      "menu-close-sketch",
-      "menu-save",
-      "menu-save-as",
-      "menu-page-setup",
-      "menu-preferences",
-      "menu-copy-forum",
-      "menu-copy-html",
-      "menu-comment",
-      "menu-indent-increase",
-      "menu-indent-decrease",
-      "menu-find",
-      "menu-find-next",
-      "menu-find-previous",
-      "menu-compile",
-      "menu-upload",
-      "menu-upload-programmer",
-      "menu-export-binary",
-      "menu-show-sketch-folder",
-      "menu-manage-libraries",
-      "menu-add-zip-library",
-      "menu-add-file",
-      "menu-auto-format",
-      "menu-archive-sketch",
-      "menu-fix-encoding",
-      "menu-serial-monitor",
-      "menu-boards-manager",
-      "menu-burn-bootloader",
-      "menu-find-reference",
-      "menu-about",
-      "menu-install-esp32"
-    ];
-
-    if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, (event, ...args) => callback(...args));
+contextBridge.exposeInMainWorld("tantalum", {
+  app: {
+    getInfo: () => ipcRenderer.invoke("app:get-info"),
+    onMenuAction: (callback) => subscribe("app:menu-action", callback)
+  },
+  cloud: {
+    auth: {
+      getCurrentUser: () => ipcRenderer.invoke("cloud:auth:get-current-user"),
+      signIn: (payload) => ipcRenderer.invoke("cloud:auth:sign-in", payload),
+      register: (payload) => ipcRenderer.invoke("cloud:auth:register", payload),
+      signOut: () => ipcRenderer.invoke("cloud:auth:sign-out")
+    },
+    databases: {
+      listDocuments: (payload) => ipcRenderer.invoke("cloud:databases:list-documents", payload),
+      createDocument: (payload) => ipcRenderer.invoke("cloud:databases:create-document", payload),
+      updateDocument: (payload) => ipcRenderer.invoke("cloud:databases:update-document", payload),
+      deleteDocument: (payload) => ipcRenderer.invoke("cloud:databases:delete-document", payload)
+    },
+    storage: {
+      createFile: (payload) => ipcRenderer.invoke("cloud:storage:create-file", payload),
+      deleteFile: (payload) => ipcRenderer.invoke("cloud:storage:delete-file", payload)
+    },
+    functions: {
+      createExecution: (payload) => ipcRenderer.invoke("cloud:functions:create-execution", payload)
     }
   },
-
-  removeMenuListener: (channel) => {
-    ipcRenderer.removeAllListeners(channel);
+  shell: {
+    openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+    openPath: (targetPath) => ipcRenderer.invoke("shell:open-path", targetPath)
   },
-
-  // ==========================================================================
-  // FILE SYSTEM
-  // ==========================================================================
-  openFolder: () => ipcRenderer.invoke("fs-open-folder"),
-  showSaveDialog: (options) => ipcRenderer.invoke("fs-show-save-dialog", options),
-  getLastWorkspace: () => ipcRenderer.invoke("fs-get-last-workspace"),
-  readDirectory: (dirPath) => ipcRenderer.invoke("fs-read-directory", dirPath),
-  readFile: (filePath) => ipcRenderer.invoke("fs-read-file", filePath),
-  writeFile: (filePath, content) => ipcRenderer.invoke("fs-write-file", { filePath, content }),
-  createFile: (folderPath, fileName, content) => ipcRenderer.invoke("fs-create-file", { folderPath, fileName, content }),
-  createFolder: (parentPath, folderName) => ipcRenderer.invoke("fs-create-folder", { parentPath, folderName }),
-  deleteFile: (targetPath) => ipcRenderer.invoke("fs-delete", targetPath),
-  renameFile: (oldPath, newPath) => ipcRenderer.invoke("fs-rename", { oldPath, newPath }),
-  addRecentFile: (filePath) => ipcRenderer.invoke("add-recent-file", filePath),
-
-  // Terminal
-  createTerminal: (options) => ipcRenderer.invoke('terminal-create', options),
-  writeTerminal: (data) => ipcRenderer.send('terminal-write', data),
-  resizeTerminal: (dims) => ipcRenderer.send('terminal-resize', dims),
-  onTerminalData: (callback) => {
-    ipcRenderer.on('terminal-incoming-data', (event, data) => callback(data));
+  fs: {
+    openFolder: () => ipcRenderer.invoke("fs:open-folder"),
+    setWorkspace: (folderPath) => ipcRenderer.invoke("fs:set-workspace", folderPath),
+    getLastWorkspace: () => ipcRenderer.invoke("fs:get-last-workspace"),
+    showSaveDialog: (options) => ipcRenderer.invoke("fs:show-save-dialog", options),
+    readDirectory: (dirPath) => ipcRenderer.invoke("fs:read-directory", dirPath),
+    readFile: (filePath) => ipcRenderer.invoke("fs:read-file", filePath),
+    writeFile: (filePath, content) => ipcRenderer.invoke("fs:write-file", { filePath, content }),
+    createFile: (folderPath, fileName, content) => ipcRenderer.invoke("fs:create-file", { folderPath, fileName, content }),
+    createFolder: (parentPath, folderName) => ipcRenderer.invoke("fs:create-folder", { parentPath, folderName }),
+    rename: (oldPath, newPath) => ipcRenderer.invoke("fs:rename", { oldPath, newPath }),
+    deletePath: (targetPath) => ipcRenderer.invoke("fs:delete", targetPath),
+    addRecentFile: (filePath) => ipcRenderer.invoke("workspace:add-recent-file", filePath)
+  },
+  secrets: {
+    setBoardSecrets: (payload) => ipcRenderer.invoke("secrets:set-board", payload),
+    getBoardSecrets: (boardId) => ipcRenderer.invoke("secrets:get-board", boardId),
+    deleteBoardSecrets: (boardId) => ipcRenderer.invoke("secrets:delete-board", boardId)
+  },
+  toolchain: {
+    compile: (payload) => ipcRenderer.invoke("toolchain:compile", payload),
+    installBoardPackage: (payload) => ipcRenderer.invoke("toolchain:install-board-package", payload),
+    removeBoardPackage: (payload) => ipcRenderer.invoke("toolchain:remove-board-package", payload),
+    listInstalledBoards: () => ipcRenderer.invoke("toolchain:list-installed-boards"),
+    searchBoardPlatforms: (query) => ipcRenderer.invoke("toolchain:search-board-platforms", query),
+    listInstalledPlatforms: () => ipcRenderer.invoke("toolchain:list-installed-platforms"),
+    searchLibraries: (query) => ipcRenderer.invoke("toolchain:search-libraries", query),
+    getFeaturedLibraries: () => ipcRenderer.invoke("toolchain:get-featured-libraries"),
+    installLibrary: (payload) => ipcRenderer.invoke("toolchain:install-library", payload),
+    listInstalledLibraries: () => ipcRenderer.invoke("toolchain:list-installed-libraries"),
+    listPorts: () => ipcRenderer.invoke("toolchain:list-ports"),
+    provisionBoard: (payload) => ipcRenderer.invoke("toolchain:provision-board", payload),
+    installEsp32Support: () => ipcRenderer.invoke("toolchain:install-esp32-support"),
+    onInstallProgress: (callback) => subscribe("toolchain:install-progress", callback)
+  },
+  terminal: {
+    create: (options) => ipcRenderer.invoke("terminal:create", options),
+    close: (sessionId) => ipcRenderer.invoke("terminal:close", sessionId),
+    navigate: (payload) => ipcRenderer.invoke("terminal:navigate", payload),
+    write: (payload) => ipcRenderer.send("terminal:write", payload),
+    resize: (payload) => ipcRenderer.send("terminal:resize", payload),
+    onData: (callback) => subscribe("terminal:data", callback),
+    onExit: (callback) => subscribe("terminal:exit", callback)
   }
 });
