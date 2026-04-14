@@ -9,10 +9,29 @@ function subscribe(channel, callback) {
   };
 }
 
+function readCloudConfig() {
+  try {
+    const result = ipcRenderer.sendSync("app:get-cloud-config-sync");
+    if (result && typeof result === "object" && !("error" in result)) {
+      return result;
+    }
+  } catch (error) {
+    console.error("Unable to load renderer cloud config:", error);
+  }
+
+  return undefined;
+}
+
 contextBridge.exposeInMainWorld("tantalum", {
   app: {
+    cloudConfig: readCloudConfig(),
     getInfo: () => ipcRenderer.invoke("app:get-info"),
     onMenuAction: (callback) => subscribe("app:menu-action", callback)
+  },
+  agent: {
+    getContext: () => ipcRenderer.invoke("agent:get-context"),
+    invokeTool: (payload) => ipcRenderer.invoke("agent:invoke-tool", payload),
+    resolveApproval: (payload) => ipcRenderer.invoke("agent:resolve-approval", payload),
   },
   cloud: {
     auth: {

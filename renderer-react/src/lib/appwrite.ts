@@ -20,13 +20,23 @@ function arrayBufferToBase64(arrayBuffer: ArrayBuffer) {
   return btoa(binary);
 }
 
+function getDesktopCloudApi() {
+  const desktopApi = window.tantalum;
+
+  if (!desktopApi?.cloud) {
+    throw new Error('The desktop bridge is unavailable. Restart the app so the preload API can initialize.');
+  }
+
+  return desktopApi.cloud;
+}
+
 export const account = {
   async get() {
-    const result = unwrapResult(await window.tantalum.cloud.auth.getCurrentUser());
+    const result = unwrapResult(await getDesktopCloudApi().auth.getCurrentUser());
     return result.user as Models.User<Models.Preferences> | null;
   },
   async create(userId: string, email: string, password: string, name?: string) {
-    const result = unwrapResult(await window.tantalum.cloud.auth.register({
+    const result = unwrapResult(await getDesktopCloudApi().auth.register({
       userId,
       email,
       password,
@@ -36,22 +46,22 @@ export const account = {
     return result.user as Models.User<Models.Preferences>;
   },
   async createEmailSession(email: string, password: string) {
-    const result = unwrapResult(await window.tantalum.cloud.auth.signIn({ email, password }));
+    const result = unwrapResult(await getDesktopCloudApi().auth.signIn({ email, password }));
     return result.session;
   },
   async createEmailPasswordSession(email: string, password: string) {
-    const result = unwrapResult(await window.tantalum.cloud.auth.signIn({ email, password }));
+    const result = unwrapResult(await getDesktopCloudApi().auth.signIn({ email, password }));
     return result.session;
   },
   async deleteSession(sessionId?: string) {
     void sessionId;
-    unwrapResult(await window.tantalum.cloud.auth.signOut());
+    unwrapResult(await getDesktopCloudApi().auth.signOut());
   },
 };
 
 export const databases = {
   async listDocuments<T>(databaseId: string, collectionId: string, queries?: string[]) {
-    const result = unwrapResult(await window.tantalum.cloud.databases.listDocuments({
+    const result = unwrapResult(await getDesktopCloudApi().databases.listDocuments({
       databaseId,
       collectionId,
       queries,
@@ -69,7 +79,7 @@ export const databases = {
     data: Record<string, unknown>,
     permissions?: string[],
   ) {
-    const result = unwrapResult(await window.tantalum.cloud.databases.createDocument({
+    const result = unwrapResult(await getDesktopCloudApi().databases.createDocument({
       databaseId,
       collectionId,
       documentId,
@@ -86,7 +96,7 @@ export const databases = {
     data: Record<string, unknown>,
     permissions?: string[],
   ) {
-    const result = unwrapResult(await window.tantalum.cloud.databases.updateDocument({
+    const result = unwrapResult(await getDesktopCloudApi().databases.updateDocument({
       databaseId,
       collectionId,
       documentId,
@@ -97,7 +107,7 @@ export const databases = {
     return result.document as T;
   },
   async deleteDocument(databaseId: string, collectionId: string, documentId: string) {
-    unwrapResult(await window.tantalum.cloud.databases.deleteDocument({
+    unwrapResult(await getDesktopCloudApi().databases.deleteDocument({
       databaseId,
       collectionId,
       documentId,
@@ -110,7 +120,7 @@ export const storage = {
     const arrayBuffer = await file.arrayBuffer();
     const base64 = arrayBufferToBase64(arrayBuffer);
 
-    const result = unwrapResult(await window.tantalum.cloud.storage.createFile({
+    const result = unwrapResult(await getDesktopCloudApi().storage.createFile({
       bucketId,
       fileId,
       filename: file.name,
@@ -122,7 +132,7 @@ export const storage = {
     return result.file as Models.File;
   },
   async deleteFile(bucketId: string, fileId: string) {
-    unwrapResult(await window.tantalum.cloud.storage.deleteFile({ bucketId, fileId }));
+    unwrapResult(await getDesktopCloudApi().storage.deleteFile({ bucketId, fileId }));
   },
 };
 
@@ -135,7 +145,7 @@ export const functions = {
     method = 'POST',
     headers?: Record<string, string>,
   ) {
-    const result = unwrapResult(await window.tantalum.cloud.functions.createExecution({
+    const result = unwrapResult(await getDesktopCloudApi().functions.createExecution({
       functionId,
       body,
       async,

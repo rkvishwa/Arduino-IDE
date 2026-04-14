@@ -43,6 +43,15 @@ export type BoardSecret = {
   updatedAt?: string;
 };
 
+export type AgentSettingsDocument = Models.Document & {
+  userId: string;
+  apiProvider: string;
+  apiKey?: string | null;
+  model?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FunctionEnvelope<T> = {
   ok: boolean;
   data?: T;

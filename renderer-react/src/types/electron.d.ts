@@ -57,16 +57,78 @@ export type CloudConfig = {
   boardsCollectionId: string;
   firmwareCollectionId: string;
   sketchesCollectionId: string;
+  agentSettingsCollectionId: string;
   firmwareBucketId: string;
   boardAdminFunctionId: string;
   deviceGatewayFunctionId: string;
+  proxyAiRequestFunctionId: string;
 };
+
+export type AgentToolName = 'list_files' | 'read_file' | 'write_file' | 'edit_file' | 'delete_file' | 'run_command';
+
+export type AgentApprovalPreview =
+  | {
+      kind: 'file';
+      path: string;
+      isNewFile: boolean;
+      originalContent: string;
+      nextContent: string;
+      stats?: {
+        changedLines: number;
+        beforeLength: number;
+        afterLength: number;
+      };
+    }
+  | {
+      kind: 'delete';
+      path: string;
+      isDirectory: boolean;
+    }
+  | {
+      kind: 'command';
+      command: string;
+      cwd: string;
+      shell: string;
+      platform: string;
+    };
+
+export type AgentApprovalRequest = {
+  requestId: string;
+  createdAt: string;
+  toolName: AgentToolName;
+  summary: string;
+  preview: AgentApprovalPreview;
+};
+
+export type AgentToolInvokeResponse =
+  | Result<{
+      toolName: AgentToolName;
+      output: string;
+      meta?: Record<string, unknown>;
+    }>
+  | Result<{
+      toolName: AgentToolName;
+      requiresApproval: true;
+      approval: AgentApprovalRequest;
+    }>;
+
+export type AgentApprovalResolution = Result<{
+  toolName: AgentToolName;
+  output: string;
+  meta?: Record<string, unknown>;
+  approved: boolean;
+}>;
 
 export type DesktopApi = {
   app: {
     cloudConfig?: CloudConfig;
     getInfo: () => Promise<Result<{ appName: string; version: string; platform: string }>>;
     onMenuAction: (callback: (action: MenuAction) => void) => () => void;
+  };
+  agent: {
+    getContext: () => Promise<Result<{ workspaceRoot: string | null; workspaceMap: string; revision: number; totalEntries: number; truncated: boolean }>>;
+    invokeTool: (payload: { toolName: AgentToolName; args?: Record<string, unknown> }) => Promise<AgentToolInvokeResponse>;
+    resolveApproval: (payload: { requestId: string; approved: boolean }) => Promise<AgentApprovalResolution>;
   };
   cloud: {
     auth: {

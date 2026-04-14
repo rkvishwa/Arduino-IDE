@@ -15,6 +15,7 @@ import {
 import { FileTree, type FileTreeFsAdapter, type FileTreeItemType, type FileTreeNode, type FileTreeTheme } from '@knurdz/jack-file-tree';
 import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
 import {
+  Bot,
   BellDot,
   BookOpen,
   ChevronDown,
@@ -55,6 +56,7 @@ import {
 import type { MenuAction } from '@/types/electron';
 
 import { ConsoleTerminal } from './ConsoleTerminal';
+import { AgentPanel } from './AgentPanel';
 import { Modal } from './Modal';
 import { TerminalWorkspace } from './TerminalWorkspace';
 
@@ -68,6 +70,7 @@ type IDEWorkspaceProps = {
 type SidebarView = 'explorer' | 'boards' | 'libraries' | 'platforms' | 'terminal';
 type ConsoleView = 'output' | 'terminal';
 type FileTabState = 'temporary' | 'preview' | 'saved';
+type InspectorView = 'agent' | 'board';
 
 type FileTab = EditorTabItem & {
   id: string;
@@ -139,7 +142,7 @@ const MIN_EDITOR_WIDTH = 360;
 const MAX_SIDE_PANEL_WIDTH = 520;
 const MAX_CONSOLE_HEIGHT = 520;
 const PANEL_RESIZE_STEP = 16;
-const RIGHT_PANEL_HIDDEN_BREAKPOINT = 1320;
+const RIGHT_PANEL_HIDDEN_BREAKPOINT = 1080;
 const LEFT_PANEL_HIDDEN_BREAKPOINT = 980;
 
 const BOARD_OPTIONS = [
@@ -261,6 +264,7 @@ export function IDEWorkspace({ appName, version, user, onSignedOut }: IDEWorkspa
   const [consolePanelOpen, setConsolePanelOpen] = useState(true);
   const [panelSizes, setPanelSizes] = useState<PanelSizes>(() => normalizePanelSizes(DEFAULT_PANEL_SIZES));
   const [activeResizePanel, setActiveResizePanel] = useState<ResizablePanel | null>(null);
+  const [inspectorView, setInspectorView] = useState<InspectorView>('agent');
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const [tabs, setTabs] = useState<FileTab[]>([]);
@@ -1385,6 +1389,33 @@ export function IDEWorkspace({ appName, version, user, onSignedOut }: IDEWorkspa
     pushConsole(message, 'error');
   }
 
+  function applyAgentFileContent(filePath: string, content: string) {
+    const nextName = fileNameFromPath(filePath);
+
+    setTabs((current) => {
+      if (!current.some((tab) => tab.path === filePath)) {
+        return current;
+      }
+
+      return markEditorTabSaved(current, filePath, {
+        content,
+        name: nextName,
+        fileState: 'saved',
+        type: 'file',
+        isPreviewFile: false,
+      });
+    });
+
+    if (activeTabId === filePath) {
+      setEditorValue(content);
+    }
+  }
+
+  function handleAgentDeletedPath(targetPath: string, isDirectory: boolean) {
+    closeTabsForPath(targetPath, isDirectory ? 'directory' : 'file');
+    refreshFileTree();
+  }
+
   const activeExplorerPath = activeTab && !activeTab.path.startsWith('untitled:') ? activeTab.path : null;
   const currentTerminalFolderPath = activeTab && !activeTab.path.startsWith('untitled:') ? parentPath(activeTab.path) : workspacePath;
   const isTerminalWorkspaceActive = sidebar === 'terminal';
@@ -1440,6 +1471,12 @@ export function IDEWorkspace({ appName, version, user, onSignedOut }: IDEWorkspa
   useEffect(() => {
     if (sidebar !== 'terminal') {
       previousSidebarRef.current = sidebar;
+    }
+  }, [sidebar]);
+
+  useEffect(() => {
+    if (sidebar === 'boards') {
+      setInspectorView('board');
     }
   }, [sidebar]);
 
@@ -2094,7 +2131,43 @@ export function IDEWorkspace({ appName, version, user, onSignedOut }: IDEWorkspa
           onPointerDown={(event) => beginResize('right', event)}
         />
 
-        <aside className="right-panel">{renderBoardDetails()}</aside>
+        <aside className="right-panel inspector-panel">
+          <div className="inspector-tabs">
+            <button className={inspectorView === 'agent' ? 'active' : ''} type="button" onClick={() => setInspectorView('agent')}>
+              <Bot size={16} />
+              Agent
+            </button>
+            <button className={inspectorView === 'board' ? 'active' : ''} type="button" onClick={() => setInspectorView('board')}>
+              <Cpu size={16} />
+              Board
+            </button>
+          </div>
+          <div className="inspector-body">
+            {inspectorView === 'agent' ? (
+              <AgentPanel
+                user={user}
+                workspacePath={workspacePath}
+                activeTab={
+                  activeTab && !activeTab.path.startsWith('untitled:')
+                    ? {
+                        path: activeTab.path,
+                        name: activeTab.name,
+                        content: editorValue,
+                        isDirty: Boolean(activeTab.isDirty),
+                      }
+                    : null
+                }
+                onFileContentApplied={applyAgentFileContent}
+                onPathDeleted={handleAgentDeletedPath}
+                onRefreshWorkspace={refreshFileTree}
+                pushConsole={pushConsole}
+                pushToast={pushToast}
+              />
+            ) : (
+              renderBoardDetails()
+            )}
+          </div>
+        </aside>
       </main>
 
       {isConsoleVisible ? (

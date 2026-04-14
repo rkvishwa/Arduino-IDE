@@ -6,7 +6,7 @@ type ModalProps = {
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 };
 
 export function Modal({ open, title, subtitle, onClose, children, size = 'md' }: ModalProps) {

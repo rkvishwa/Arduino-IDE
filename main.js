@@ -17,6 +17,17 @@ const {
   searchBoardPlatforms,
   searchLibraries
 } = require("./arduinoHandler");
+const { SecurityManager } = require("./src/agent/securityManager");
+const { getRendererCloudConfig } = require("./src/config/runtimeCloudConfig");
+const {
+  applySearchReplaceDiff,
+  buildCommandPreview,
+  readUtf8IfPresent,
+  resolveWorkspacePath,
+  runWorkspaceCommand,
+  summarizeFileChange,
+} = require("./src/agent/tooling");
+const { WorkspaceScanner } = require("./src/agent/workspaceScanner");
 const provisioningService = require("./src/services/provisioningService");
 const appwriteManifest = require("./appwrite.config.json");
 
@@ -44,6 +55,8 @@ let rendererServer = null;
 let rendererServerUrl = null;
 const trustedRoots = new Set();
 const terminalSessions = new Map();
+const workspaceScanner = new WorkspaceScanner();
+const securityManager = new SecurityManager();
 
 let pty = null;
 try {
@@ -67,6 +80,7 @@ function setCurrentWorkspace(workspacePath) {
   currentWorkspace = absolutePath;
   registerTrustedPath(absolutePath);
   preferenceStore?.set("lastWorkspace", absolutePath);
+  workspaceScanner.markDirty();
 }
 
 function getRecentFiles() {
@@ -137,6 +151,40 @@ function toErrorResult(error) {
   return {
     success: false,
     error: error instanceof Error ? error.message : "Unexpected error"
+  };
+}
+
+function markWorkspaceDirty(changedPath = currentWorkspace) {
+  if (!currentWorkspace) {
+    return workspaceScanner.getRevision();
+  }
+
+  if (changedPath) {
+    const absolutePath = path.resolve(changedPath);
+    if (!isPathInsideRoot(absolutePath, currentWorkspace)) {
+      return workspaceScanner.getRevision();
+    }
+  }
+
+  return workspaceScanner.markDirty();
+}
+
+function toWorkspaceRelativePath(absolutePath) {
+  if (!currentWorkspace) {
+    return absolutePath;
+  }
+
+  const relativePath = path.relative(currentWorkspace, absolutePath);
+  return relativePath && relativePath.length > 0 ? relativePath : ".";
+}
+
+function serializeApproval(approval) {
+  return {
+    requestId: approval.requestId,
+    createdAt: approval.createdAt,
+    toolName: approval.toolName,
+    summary: approval.summary,
+    preview: approval.preview,
   };
 }
 
@@ -683,6 +731,280 @@ ipcMain.handle("app:get-info", async () => ({
   platform: process.platform
 }));
 
+ipcMain.on("app:get-cloud-config-sync", (event) => {
+  try {
+    event.returnValue = getRendererCloudConfig();
+  } catch (error) {
+    event.returnValue = {
+      error: error instanceof Error ? error.message : "Unable to read cloud configuration.",
+    };
+  }
+});
+
+ipcMain.handle("agent:get-context", async () => {
+  try {
+    const scanResult = await workspaceScanner.scan(currentWorkspace, ".");
+    return {
+      success: true,
+      workspaceRoot: scanResult.rootPath,
+      workspaceMap: scanResult.tree,
+      revision: scanResult.revision,
+      totalEntries: scanResult.totalEntries,
+      truncated: scanResult.truncated,
+    };
+  } catch (error) {
+    return toErrorResult(error);
+  }
+});
+
+ipcMain.handle("agent:invoke-tool", async (_event, payload = {}) => {
+  try {
+    const toolName = typeof payload.toolName === "string" ? payload.toolName : "";
+    const args = payload.args && typeof payload.args === "object" ? payload.args : {};
+
+    switch (toolName) {
+      case "list_files": {
+        const scanResult = await workspaceScanner.scan(currentWorkspace, args.path || ".");
+        return {
+          success: true,
+          toolName,
+          output: scanResult.tree,
+          meta: {
+            path: scanResult.relativePath,
+            totalEntries: scanResult.totalEntries,
+            truncated: scanResult.truncated,
+            revision: scanResult.revision,
+          },
+        };
+      }
+
+      case "read_file": {
+        const absolutePath = resolveWorkspacePath(currentWorkspace, args.path);
+        const content = await fsPromises.readFile(absolutePath, "utf8");
+
+        return {
+          success: true,
+          toolName,
+          output: content,
+          meta: {
+            path: toWorkspaceRelativePath(absolutePath),
+            bytes: Buffer.byteLength(content, "utf8"),
+          },
+        };
+      }
+
+      case "write_file": {
+        const absolutePath = resolveWorkspacePath(currentWorkspace, args.path);
+        const relativePath = toWorkspaceRelativePath(absolutePath);
+        const nextContent = typeof args.content === "string" ? args.content : "";
+        const originalContent = await readUtf8IfPresent(absolutePath);
+        const changeSummary = summarizeFileChange(originalContent ?? "", nextContent);
+
+        const approval = securityManager.createApproval({
+          toolName,
+          summary: originalContent === null ? `Create ${relativePath}` : `Overwrite ${relativePath}`,
+          preview: {
+            kind: "file",
+            path: relativePath,
+            isNewFile: originalContent === null,
+            originalContent: originalContent ?? "",
+            nextContent,
+            stats: changeSummary,
+          },
+          execute: async () => {
+            const latestContent = await readUtf8IfPresent(absolutePath);
+            if ((latestContent ?? null) !== originalContent) {
+              throw new Error("The file changed after approval was requested. Ask the agent to refresh and try again.");
+            }
+
+            await fsPromises.mkdir(path.dirname(absolutePath), { recursive: true });
+            await fsPromises.writeFile(absolutePath, nextContent, "utf8");
+            addRecentFile(absolutePath);
+            const revision = markWorkspaceDirty(absolutePath);
+
+            return {
+              toolName,
+              output: `Saved ${relativePath}.`,
+              meta: {
+                action: originalContent === null ? "create" : "write",
+                path: relativePath,
+                revision,
+                stats: changeSummary,
+                content: nextContent,
+              },
+            };
+          },
+        });
+
+        return {
+          success: true,
+          toolName,
+          requiresApproval: true,
+          approval: serializeApproval(approval),
+        };
+      }
+
+      case "edit_file": {
+        const absolutePath = resolveWorkspacePath(currentWorkspace, args.path);
+        const relativePath = toWorkspaceRelativePath(absolutePath);
+        const originalContent = await fsPromises.readFile(absolutePath, "utf8");
+        const nextContent = applySearchReplaceDiff(originalContent, String(args.diff ?? ""));
+        const changeSummary = summarizeFileChange(originalContent, nextContent);
+
+        const approval = securityManager.createApproval({
+          toolName,
+          summary: `Edit ${relativePath}`,
+          preview: {
+            kind: "file",
+            path: relativePath,
+            isNewFile: false,
+            originalContent,
+            nextContent,
+            stats: changeSummary,
+          },
+          execute: async () => {
+            const latestContent = await fsPromises.readFile(absolutePath, "utf8");
+            if (latestContent !== originalContent) {
+              throw new Error("The file changed after approval was requested. Ask the agent to re-read it and try again.");
+            }
+
+            await fsPromises.writeFile(absolutePath, nextContent, "utf8");
+            addRecentFile(absolutePath);
+            const revision = markWorkspaceDirty(absolutePath);
+
+            return {
+              toolName,
+              output: `Updated ${relativePath}.`,
+              meta: {
+                action: "edit",
+                path: relativePath,
+                revision,
+                stats: changeSummary,
+                content: nextContent,
+              },
+            };
+          },
+        });
+
+        return {
+          success: true,
+          toolName,
+          requiresApproval: true,
+          approval: serializeApproval(approval),
+        };
+      }
+
+      case "delete_file": {
+        const absolutePath = resolveWorkspacePath(currentWorkspace, args.path);
+        const relativePath = toWorkspaceRelativePath(absolutePath);
+        const stats = await fsPromises.stat(absolutePath);
+
+        const approval = securityManager.createApproval({
+          toolName,
+          summary: `Delete ${relativePath}`,
+          preview: {
+            kind: "delete",
+            path: relativePath,
+            isDirectory: stats.isDirectory(),
+          },
+          execute: async () => {
+            const latestStats = await fsPromises.stat(absolutePath);
+            if (latestStats.isDirectory()) {
+              await fsPromises.rm(absolutePath, { recursive: true, force: false });
+            } else {
+              await fsPromises.unlink(absolutePath);
+            }
+
+            const revision = markWorkspaceDirty(absolutePath);
+            return {
+              toolName,
+              output: `Deleted ${relativePath}.`,
+              meta: {
+                action: "delete",
+                path: relativePath,
+                revision,
+                isDirectory: stats.isDirectory(),
+              },
+            };
+          },
+        });
+
+        return {
+          success: true,
+          toolName,
+          requiresApproval: true,
+          approval: serializeApproval(approval),
+        };
+      }
+
+      case "run_command": {
+        const command = String(args.command ?? "").trim();
+        if (!currentWorkspace) {
+          throw new Error("Open a workspace before running commands.");
+        }
+
+        const approval = securityManager.createApproval({
+          toolName,
+          summary: `Run command in workspace: ${command}`,
+          preview: {
+            kind: "command",
+            ...buildCommandPreview(command, currentWorkspace),
+          },
+          execute: async () => {
+            const result = await runWorkspaceCommand(command, currentWorkspace);
+
+            return {
+              toolName,
+              output: [
+                `Exit code: ${result.exitCode}`,
+                result.output || "(The command produced no output.)",
+              ].join("\n\n"),
+              meta: {
+                action: "command",
+                ...result,
+              },
+            };
+          },
+        });
+
+        return {
+          success: true,
+          toolName,
+          requiresApproval: true,
+          approval: serializeApproval(approval),
+        };
+      }
+
+      default:
+        throw new Error(`Unknown agent tool: ${toolName}`);
+    }
+  } catch (error) {
+    return toErrorResult(error);
+  }
+});
+
+ipcMain.handle("agent:resolve-approval", async (_event, payload = {}) => {
+  try {
+    const requestId = typeof payload.requestId === "string" ? payload.requestId : "";
+    if (!requestId) {
+      throw new Error("requestId is required.");
+    }
+
+    const result = await securityManager.resolveApproval(requestId, Boolean(payload.approved));
+    return {
+      success: true,
+      toolName: result.toolName,
+      output: result.output,
+      meta: result.meta ?? {
+        denied: result.approved === false,
+      },
+      approved: result.approved !== false,
+    };
+  } catch (error) {
+    return toErrorResult(error);
+  }
+});
+
 ipcMain.handle("cloud:auth:get-current-user", async () => {
   try {
     const user = await appwriteRequest({ pathName: "account" });
@@ -1023,6 +1345,7 @@ ipcMain.handle("fs:write-file", async (_event, payload) => {
     await fsPromises.writeFile(absolutePath, payload.content, "utf8");
 
     addRecentFile(absolutePath);
+    markWorkspaceDirty(absolutePath);
     return { success: true };
   } catch (error) {
     return toErrorResult(error);
@@ -1040,6 +1363,7 @@ ipcMain.handle("fs:create-file", async (_event, payload) => {
 
     await fsPromises.writeFile(targetPath, payload.content ?? "", "utf8");
     addRecentFile(targetPath);
+    markWorkspaceDirty(targetPath);
 
     return { success: true, path: targetPath };
   } catch (error) {
@@ -1057,6 +1381,7 @@ ipcMain.handle("fs:create-folder", async (_event, payload) => {
     }
 
     await fsPromises.mkdir(targetPath, { recursive: false });
+    markWorkspaceDirty(targetPath);
     return { success: true, path: targetPath };
   } catch (error) {
     return toErrorResult(error);
@@ -1073,6 +1398,7 @@ ipcMain.handle("fs:rename", async (_event, payload) => {
     }
 
     await fsPromises.rename(oldPath, newPath);
+    markWorkspaceDirty(newPath);
     return { success: true, path: newPath };
   } catch (error) {
     return toErrorResult(error);
@@ -1092,6 +1418,7 @@ ipcMain.handle("fs:delete", async (_event, targetPath) => {
       await fsPromises.unlink(absolutePath);
     }
 
+    markWorkspaceDirty(absolutePath);
     return { success: true };
   } catch (error) {
     return toErrorResult(error);
