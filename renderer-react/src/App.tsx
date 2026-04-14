@@ -17,18 +17,29 @@ function App() {
 
   useEffect(() => {
     let mounted = true;
+    const desktopApp = (window as typeof window & { tantalum?: { app?: { getInfo?: () => Promise<AppInfoResult> } } }).tantalum?.app;
 
-    void window.tantalum.app.getInfo().then((result) => {
-      if (mounted && result.success) {
-        setAppInfo({ appName: result.appName, version: result.version });
-      }
-    });
+    if (typeof desktopApp?.getInfo === 'function') {
+      void desktopApp.getInfo()
+        .then((result) => {
+          if (mounted && result.success) {
+            setAppInfo({ appName: result.appName, version: result.version });
+          }
+        })
+        .catch(() => {});
+    }
 
-    void getCurrentUser().then((resolvedUser) => {
-      if (mounted) {
-        setUser(resolvedUser);
-      }
-    });
+    void getCurrentUser()
+      .then((resolvedUser) => {
+        if (mounted) {
+          setUser(resolvedUser);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setUser(null);
+        }
+      });
 
     return () => {
       mounted = false;
@@ -53,5 +64,9 @@ function App() {
 
   return <IDEWorkspace appName={appInfo.appName} version={appInfo.version} user={user} onSignedOut={() => setUser(null)} />;
 }
+
+type AppInfoResult =
+  | { success: true; appName: string; version: string; platform: string }
+  | { success: false; error: string };
 
 export default App;

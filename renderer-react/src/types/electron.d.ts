@@ -50,8 +50,21 @@ export type TerminalExitEvent = {
   signal: number;
 };
 
+export type CloudConfig = {
+  endpoint: string;
+  projectId: string;
+  databaseId: string;
+  boardsCollectionId: string;
+  firmwareCollectionId: string;
+  sketchesCollectionId: string;
+  firmwareBucketId: string;
+  boardAdminFunctionId: string;
+  deviceGatewayFunctionId: string;
+};
+
 export type DesktopApi = {
   app: {
+    cloudConfig?: CloudConfig;
     getInfo: () => Promise<Result<{ appName: string; version: string; platform: string }>>;
     onMenuAction: (callback: (action: MenuAction) => void) => () => void;
   };

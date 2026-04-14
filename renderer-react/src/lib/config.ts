@@ -1,4 +1,15 @@
+import type { CloudConfig } from '@/types/electron';
+
 const env = import.meta.env;
+const desktopCloudConfig: Partial<CloudConfig> = (
+  window as typeof window & {
+    tantalum?: {
+      app?: {
+        cloudConfig?: Partial<CloudConfig>;
+      };
+    };
+  }
+).tantalum?.app?.cloudConfig ?? {};
 
 function readConfig(name: string, fallback = '') {
   const value = env[name as keyof ImportMetaEnv];
@@ -6,15 +17,15 @@ function readConfig(name: string, fallback = '') {
 }
 
 export const appwriteConfig = {
-  endpoint: readConfig('VITE_APPWRITE_ENDPOINT', 'https://sgp.cloud.appwrite.io/v1'),
-  projectId: readConfig('VITE_APPWRITE_PROJECT_ID', '697b8f42002a34ba04b3'),
-  databaseId: readConfig('VITE_APPWRITE_DATABASE_ID', '697b8f660033fffde4be'),
-  boardsCollectionId: readConfig('VITE_APPWRITE_BOARDS_COLLECTION_ID', 'boards'),
-  firmwareCollectionId: readConfig('VITE_APPWRITE_FIRMWARE_COLLECTION_ID', 'firmwares'),
-  sketchesCollectionId: readConfig('VITE_APPWRITE_SKETCHES_COLLECTION_ID', 'sketches'),
-  firmwareBucketId: readConfig('VITE_APPWRITE_FIRMWARE_BUCKET_ID', 'firmware_bucket'),
-  boardAdminFunctionId: readConfig('VITE_APPWRITE_BOARD_ADMIN_FUNCTION_ID'),
-  deviceGatewayFunctionId: readConfig('VITE_APPWRITE_DEVICE_GATEWAY_FUNCTION_ID'),
+  endpoint: readConfig('VITE_APPWRITE_ENDPOINT', desktopCloudConfig.endpoint ?? ''),
+  projectId: readConfig('VITE_APPWRITE_PROJECT_ID', desktopCloudConfig.projectId ?? ''),
+  databaseId: readConfig('VITE_APPWRITE_DATABASE_ID', desktopCloudConfig.databaseId ?? ''),
+  boardsCollectionId: readConfig('VITE_APPWRITE_BOARDS_COLLECTION_ID', desktopCloudConfig.boardsCollectionId ?? ''),
+  firmwareCollectionId: readConfig('VITE_APPWRITE_FIRMWARE_COLLECTION_ID', desktopCloudConfig.firmwareCollectionId ?? ''),
+  sketchesCollectionId: readConfig('VITE_APPWRITE_SKETCHES_COLLECTION_ID', desktopCloudConfig.sketchesCollectionId ?? ''),
+  firmwareBucketId: readConfig('VITE_APPWRITE_FIRMWARE_BUCKET_ID', desktopCloudConfig.firmwareBucketId ?? ''),
+  boardAdminFunctionId: readConfig('VITE_APPWRITE_BOARD_ADMIN_FUNCTION_ID', desktopCloudConfig.boardAdminFunctionId ?? ''),
+  deviceGatewayFunctionId: readConfig('VITE_APPWRITE_DEVICE_GATEWAY_FUNCTION_ID', desktopCloudConfig.deviceGatewayFunctionId ?? ''),
 };
 
 export function hasRequiredCloudConfiguration() {

@@ -627,6 +627,41 @@ function createMainWindow() {
     }
   });
 
+  mainWindow.webContents.on("did-finish-load", () => {
+    console.log("[renderer] did-finish-load");
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    console.error("[renderer] did-fail-load", {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame,
+    });
+  });
+
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const prefix = `[renderer console:${level}]`;
+    if (level >= 2) {
+      console.error(prefix, message, sourceId ? `(${sourceId}:${line})` : "");
+      return;
+    }
+
+    console.log(prefix, message, sourceId ? `(${sourceId}:${line})` : "");
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[renderer] render-process-gone", details);
+  });
+
+  mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error("[renderer] preload-error", preloadPath, error);
+  });
+
+  mainWindow.on("unresponsive", () => {
+    console.error("[renderer] window became unresponsive");
+  });
+
   void loadRenderer(mainWindow);
 
   mainWindow.once("ready-to-show", () => {

@@ -1,0 +1,62 @@
+const appwriteManifest = require('../../appwrite.config.json');
+
+function deriveCollections(config) {
+  if (config.collections && typeof config.collections === 'object') {
+    return config.collections;
+  }
+
+  const tables = Array.isArray(config.tables) ? config.tables : [];
+  return {
+    boards: tables.find((table) => table.$id === 'boards')?.$id || 'boards',
+    firmwares: tables.find((table) => table.$id === 'firmwares')?.$id || 'firmwares',
+    sketches: tables.find((table) => table.$id === 'sketches')?.$id || 'sketches',
+  };
+}
+
+function deriveDatabaseId(config) {
+  if (typeof config.databaseId === 'string' && config.databaseId.length > 0) {
+    return config.databaseId;
+  }
+
+  const tablesDb = Array.isArray(config.tablesDB) ? config.tablesDB : [];
+  return tablesDb[0]?.$id || '';
+}
+
+function deriveFirmwareBucketId(config) {
+  if (typeof config.firmwareBucketId === 'string' && config.firmwareBucketId.length > 0) {
+    return config.firmwareBucketId;
+  }
+
+  const buckets = Array.isArray(config.buckets) ? config.buckets : [];
+  return buckets.find((bucket) => bucket.$id === 'firmware_bucket')?.$id || buckets[0]?.$id || '';
+}
+
+function deriveFunctionId(config, preferredId) {
+  const functions = Array.isArray(config.functions) ? config.functions : [];
+  const match = functions.find((entry) => entry?.$id === preferredId || entry?.name === preferredId);
+  return match?.$id || '';
+}
+
+function getRendererCloudConfig() {
+  const collections = deriveCollections(appwriteManifest);
+
+  return {
+    endpoint: String(appwriteManifest.endpoint || '').trim(),
+    projectId: String(appwriteManifest.projectId || '').trim(),
+    databaseId: deriveDatabaseId(appwriteManifest),
+    boardsCollectionId: String(collections.boards || '').trim(),
+    firmwareCollectionId: String(collections.firmwares || '').trim(),
+    sketchesCollectionId: String(collections.sketches || '').trim(),
+    firmwareBucketId: deriveFirmwareBucketId(appwriteManifest),
+    boardAdminFunctionId: deriveFunctionId(appwriteManifest, 'board-admin'),
+    deviceGatewayFunctionId: deriveFunctionId(appwriteManifest, 'device-gateway'),
+  };
+}
+
+module.exports = {
+  deriveCollections,
+  deriveDatabaseId,
+  deriveFirmwareBucketId,
+  deriveFunctionId,
+  getRendererCloudConfig,
+};

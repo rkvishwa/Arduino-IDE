@@ -104,7 +104,7 @@ export function AuthScreen({ appName, onAuthenticated }: AuthScreenProps) {
 
         {!canUseCloud ? (
           <div className="inline-banner inline-banner-warning">
-            Appwrite environment variables are incomplete. Add the renderer env file before using authentication or cloud features.
+            Appwrite configuration is incomplete. Add the missing values in `appwrite.config.json` or provide renderer env overrides before using authentication or cloud features.
           </div>
         ) : null}
 

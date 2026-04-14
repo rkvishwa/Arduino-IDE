@@ -1791,7 +1791,7 @@ export function IDEWorkspace({ appName, version, user, onSignedOut }: IDEWorkspa
 
       {!hasRequiredCloudConfiguration() ? (
         <div className="inline-banner inline-banner-error">
-          Appwrite configuration is incomplete. Add the renderer env file before using authentication, boards, database documents, or storage uploads.
+          Appwrite configuration is incomplete. Add the missing values in `appwrite.config.json` or provide renderer env overrides before using authentication, boards, database documents, or storage uploads.
         </div>
       ) : null}
       {!hasBoardAdminFunction() ? (
